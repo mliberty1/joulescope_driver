@@ -20,7 +20,7 @@
  * @brief Joulescope driver test utility
  */
 
-#include "jsdrv_prv.h"
+#include "minibitty_exe_prv.h"
 #include "jsdrv/error_code.h"
 #include "jsdrv/log.h"
 #include "jsdrv/cstr.h"
@@ -43,6 +43,7 @@ struct command_s {
 };
 
 struct app_s app_;
+volatile bool quit_ = false;
 
 // cross-platform handler for CTRL-C to exit program
 static void signal_handler(int signal){
@@ -122,20 +123,9 @@ int32_t app_match(struct app_s * self, const char * filter) {
 }
 
 const struct command_s COMMANDS[] = {
-        {"capture", on_capture, "Capture sample data to a file"},
-        {"demo", on_demo, "Demonstrate streaming"},
-        {"dev",  on_dev,  "Developer tools"},
         {"hotplug", on_hotplug, "Monitor device insertion and removal"},
         {"info", on_info, "List connected devices and display device details"},
-        {"mem_erase", on_mem_erase, "Erase memory region"},
-        {"mem_read", on_mem_read, "Read memory region"},
-        {"mem_write", on_mem_write, "Write memory region"},
-        {"reset", on_reset, "Reset to target"},
-        {"scan", on_scan, "List connected devices"},
-        {"set",  on_set,  "Set parameters"},
-        {"statistics",  on_statistics,  "Display statistics from all connected devices"},
-        {"stream_buffer",  on_stream_buffer,  "Demonstrate stream buffer"},
-        {"threads", on_threads, "Demonstrate multi-thread access"},
+        {"loopback", on_loopback, "Loopback data to test throughput and error rate"},
         {"version", on_version, "Display version and platform information"},
         {"help", on_help, "Display help"},
         {NULL, NULL, NULL}
@@ -143,7 +133,7 @@ const struct command_s COMMANDS[] = {
 
 static int usage(void) {
     const struct command_s * cmd = COMMANDS;
-    printf("usage: jsdrv [--log-level <LEVEL>] <COMMAND> [...args]\n");
+    printf("usage: minibitty [--log-level <LEVEL>] <COMMAND> [...args]\n");
     printf("\n--log_level: Configure the log level to stdout\n"
            "    off, emergency, alert, critical, [error], warning,\n"
            "    notice, info, debug1, debug2, debug3, all\n");

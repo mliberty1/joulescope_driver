@@ -822,9 +822,9 @@ static void device_scan(struct backend_s * s) {
         s->devices[i].mark = DEVICE_MARK_NONE;
     }
 
-    while (dt->device_type) {
-        JSDRV_LOGD1("scan device_type %d: model=%s, vid=0x%04x, pid=0x%04x",
-                  dt->device_type, dt->model, dt->vendor_id, dt->product_id);
+    while (dt->model) {
+        JSDRV_LOGD1("scan: model=%s, vid=0x%04x, pid=0x%04x",
+                    dt->model, dt->vendor_id, dt->product_id);
         HANDLE handle = SetupDiGetClassDevsW(&dt->guid, NULL, NULL, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
         if (!handle) {
             JSDRV_LOGE("SetupDiGetClassDevs failed.");
@@ -845,7 +845,7 @@ static void device_scan(struct backend_s * s) {
                 wcstombs_s(0, device_path, sizeof(device_path), dev_interface_detail->DevicePath, _TRUNCATE);
                 device_update(s, dt, device_path);
             } else {
-                WINDOWS_LOGE("SetupDiGetDeviceInterfaceDetailW failed %d", dt->device_type);
+                WINDOWS_LOGE("SetupDiGetDeviceInterfaceDetailW failed %s", dt->model);
             }
             jsdrv_free(dev_interface_detail);
             jsdrv_memset(&dev_interface, 0, sizeof(dev_interface));

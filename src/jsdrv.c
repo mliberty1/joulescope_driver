@@ -512,6 +512,10 @@ static void device_add_msg(struct jsdrv_context_s * c, struct jsdrvp_msg_s * msg
         rv = jsdrvp_ul_js110_usb_factory(&d->device, c, &msg->payload.device);
     } else if (0 == strcmp("&js220", model))  {
         rv = jsdrvp_ul_js220_usb_factory(&d->device, c, &msg->payload.device);
+    } else if (0 == strcmp("mb", model))  {
+        rv = jsdrvp_ul_mb_device_usb_factory(&d->device, c, &msg->payload.device);
+    } else if (0 == strcmp("&mb", model))  {
+        rv = jsdrvp_ul_mb_device_usb_factory(&d->device, c, &msg->payload.device);
 #if UNITTEST == 0
     //} else if (0 == strcmp("emu", model)) {
     //    rv = jsdrvp_ul_emu_factory(&d->device, c, &msg->payload.device);
@@ -1001,16 +1005,16 @@ void jsdrvp_send_finalize_msg(struct jsdrv_context_s * context, struct msg_queue
     msg_queue_push(q, msg);
 }
 
-int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode) {
+int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode, uint32_t timeout_ms) {
     struct jsdrv_topic_s t;
     jsdrv_topic_set(&t, device_prefix);
     jsdrv_topic_append(&t, JSDRV_MSG_OPEN);
-    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(mode), JSDRV_TIMEOUT_MS_DEFAULT);
+    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(mode), timeout_ms);
 }
 
-int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix) {
+int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix, uint32_t timeout_ms) {
     struct jsdrv_topic_s t;
     jsdrv_topic_set(&t, device_prefix);
     jsdrv_topic_append(&t, JSDRV_MSG_CLOSE);
-    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(0), JSDRV_TIMEOUT_MS_DEFAULT);
+    return jsdrv_publish(context, t.topic, &jsdrv_union_i32(0), timeout_ms);
 }

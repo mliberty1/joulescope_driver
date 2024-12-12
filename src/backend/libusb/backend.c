@@ -541,7 +541,7 @@ static int32_t device_add(struct backend_s * s, libusb_device * usb_device, stru
     jsdrv_list_initialize(&d->item);
 
     const struct device_type_s * dt = device_types;
-    while (dt->device_type) {
+    while (dt->model) {
         if ((dt->vendor_id == descriptor->idVendor) && (dt->product_id == descriptor->idProduct)) {
             // device matches device_type
             d->mark = DEVICE_MARK_ADDED;

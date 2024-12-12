@@ -34,6 +34,16 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
+add_executable(minibitty_exe
+        minibitty/main.c
+        minibitty/hotplug.c
+        minibitty/info.c
+        minibitty/loopback.c
+        minibitty/version.c
+)
+add_dependencies(minibitty_exe jsdrv)
+target_link_libraries(minibitty_exe jsdrv)
+set_target_properties(minibitty_exe PROPERTIES OUTPUT_NAME minibitty)
 
 add_executable(fuzz fuzz.c)
 add_dependencies(fuzz jsdrv)

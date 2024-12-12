@@ -38,16 +38,7 @@ typedef struct _GUID {
 } GUID;
 #endif
 
-enum jsdrv_device_type_e {
-    JSDRV_DEVICE_TYPE_INVALID,
-    JSDRV_DEVICE_TYPE_JS110_APP,
-    JSDRV_DEVICE_TYPE_JS110_BL,
-    JSDRV_DEVICE_TYPE_JS220_APP,
-    JSDRV_DEVICE_TYPE_JS220_BL,
-};
-
 struct device_type_s {
-    enum jsdrv_device_type_e device_type;
     const char * model;
     GUID const guid;      // The GUID for the Microsoft WinUSB descriptor.
     uint16_t vendor_id;   // The 2-byte USB vendor identifier integer.

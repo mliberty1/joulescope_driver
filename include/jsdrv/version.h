@@ -44,7 +44,7 @@
  * Changes in the major version indicate that this release
  * breaks backwards compatibility.
  */
-#define JSDRV_VERSION_MAJOR 1
+#define JSDRV_VERSION_MAJOR 2
 
 /**
  * @brief The Joulescope driver minor version.
@@ -53,14 +53,14 @@
  * added.  Any changes that break backwards compatibility should
  * not adversely affect performance.
  */
-#define JSDRV_VERSION_MINOR 7
+#define JSDRV_VERSION_MINOR 0
 
 /**
  * @brief The Joulescope driver patch version.
  *
  * Changes in the patch version indicate bug fixes and improvements.
  */
-#define JSDRV_VERSION_PATCH 2
+#define JSDRV_VERSION_PATCH 0
 
 /**
  * \brief The maximum version string length.

@@ -641,6 +641,8 @@ JSDRV_API int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
  * @param context The Joulescope driver context.
  * @param device_prefix The device prefix string.
  * @param mode The #jsdrv_device_open_mode_e.
+ * @param timeout_ms When 0, open asynchronously.
+ *      When nonzero, block awaiting the open operation to complete.
  * @return 0 or error code.
  *
  * This is a convenience function that wraps a single call to
@@ -648,13 +650,16 @@ JSDRV_API int32_t jsdrv_unsubscribe_all(struct jsdrv_context_s * context,
  * Language wrappers should not wrap this function and instead
  * call jsdrv_publish() directly.
  */
-JSDRV_API int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode);
+JSDRV_API int32_t jsdrv_open(struct jsdrv_context_s * context, const char * device_prefix, int32_t mode,
+                             uint32_t timeout_ms);
 
 /**
  * @brief Close a device.
  *
  * @param context The Joulescope driver context.
  * @param device_prefix The device prefix string.
+ * @param timeout_ms When 0, close asynchronously.
+ *      When nonzero, block awaiting the close operation to complete.
  * @return 0 or error code.
  *
  * This is a convenience function that wraps a single call to
@@ -662,7 +667,7 @@ JSDRV_API int32_t jsdrv_open(struct jsdrv_context_s * context, const char * devi
  * Language wrappers should not wrap this function and instead
  * call jsdrv_publish() directly.
  */
-JSDRV_API int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix);
+JSDRV_API int32_t jsdrv_close(struct jsdrv_context_s * context, const char * device_prefix, uint32_t timeout_ms);
 
 /**
  * @brief Compute the calibration hash.

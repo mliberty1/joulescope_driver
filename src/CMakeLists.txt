@@ -56,6 +56,7 @@ set(SUPPORT_SOURCES
         js220_stats.c
         json.c
         log.c
+        mb_device.c
         pubsub.c
         meta.c
         sample_buffer_f32.c
