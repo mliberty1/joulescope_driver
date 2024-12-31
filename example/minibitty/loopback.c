@@ -23,22 +23,24 @@
 
 #include <windows.h>  // todo remove
 
-
 #define PING_SIZE_U32 ((512U - 12U) >> 2)
 
 
 static int link_lookback(struct app_s * self, const char * device) {
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
+    Sleep(100);
+
     jsdrv_topic_set(&self->topic, self->device.topic);
     jsdrv_topic_append(&self->topic, "h/link/!ping");
 
-    for (int k = 0; k < 1; ++k) {
+    for (int k = 0; k < 10; ++k) {
         uint32_t offset = k * 200;
         uint32_t ping_data[PING_SIZE_U32];
         for (uint32_t i = 0; i < PING_SIZE_U32; ++i) {
             ping_data[i] = offset + i;
         }
         jsdrv_publish(self->context, self->topic.topic, &jsdrv_union_bin((uint8_t *) ping_data, sizeof(ping_data)), 0);
+        Sleep(100);
     }
 
     Sleep(1000);

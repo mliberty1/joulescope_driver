@@ -120,12 +120,12 @@ static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e servic
         JSDRV_LOGE("send_to_device: invalid length %ul", length);
         return;
     }
-    uint32_t length_u32 = ((length + 3) >> 2) - 1;
+    uint32_t length_u32 = length + 3;  // header and check
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_OUT_DATA, &jsdrv_union_i32(0));
     m->value.type = JSDRV_UNION_BIN;
     m->value.value.bin = m->payload.bin;
     m->extra.bkusb_stream.endpoint = MB_USB_EP_BULK_OUT;
-    m->value.size = 4 * (3 + length_u32 + 1);
+    m->value.size = length_u32 << 2;
     uint8_t * data_u8 = m->payload.bin;
     uint16_t * data_u16 = (uint16_t *) data_u8;
     uint32_t * data_u32 =  (uint32_t *) data_u8;
@@ -134,11 +134,11 @@ static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e servic
     data_u8[1] = MB_FRAMER_SOF2 | service_type;
     data_u16[1] = (MB_FRAME_FT_DATA << 11) | (d->out_frame_id & MB_FRAMER_FRAME_ID_MAX);
     d->out_frame_id = (d->out_frame_id + 1) & MB_FRAMER_FRAME_ID_MAX;
-    data_u8[4] = length_u32;
-    data_u8[5] = mb_frame_length_check(length_u32);
+    data_u8[4] = length - 1;
+    data_u8[5] = mb_frame_length_check(length - 1);
     data_u16[3] = metadata;
-    memcpy(&data_u8[8], data, (length_u32 + 1) * 4);
-    data_u32[2 + 1 + length_u32] = 0;  // no frame_check on USB
+    memcpy(&data_u8[8], data, length << 2);
+    data_u32[length_u32 - 1] = 0;  // no frame_check on USB
     msg_queue_push(d->ll.cmd_q, m);
 }
 
@@ -183,7 +183,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     //    // todo error code.
     } else if ((topic[0] == 'h') && (topic[1] == '/')) {
         if (0 == strcmp("h/link/!ping", topic)) {
-            JSDRV_LOGI("PING");
+            JSDRV_LOGI("PING %d", msg->value.size);
             send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING,
                 (uint32_t *) msg->value.value.bin, (msg->value.size + 3) >> 2);
         } else {
