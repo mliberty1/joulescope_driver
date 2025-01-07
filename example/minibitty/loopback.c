@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Jetperch LLC
+ * Copyright 2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,25 +25,41 @@
 
 #define PING_SIZE_U32 ((512U - 12U) >> 2)
 
+volatile uint64_t ping_count = 0;
+volatile uint64_t pong_count = 0;
+
+
+static void on_pong(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    const uint32_t * p_u32 = (const uint32_t *) value->value.bin;
+    printf("pong %llu %lu %lu\n", pong_count, value->size, p_u32[0]);
+    pong_count++;
+}
 
 static int link_lookback(struct app_s * self, const char * device) {
+    struct jsdrv_topic_s pong_topic;
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
     Sleep(100);
+
+    jsdrv_topic_set(&pong_topic, self->device.topic);
+    jsdrv_topic_append(&pong_topic, "h/link/!pong");
+    jsdrv_subscribe(self->context, pong_topic.topic, JSDRV_SFLAG_PUB, on_pong, NULL, 0);
 
     jsdrv_topic_set(&self->topic, self->device.topic);
     jsdrv_topic_append(&self->topic, "h/link/!ping");
 
-    for (int k = 0; k < 10; ++k) {
-        uint32_t offset = k * 200;
-        uint32_t ping_data[PING_SIZE_U32];
-        for (uint32_t i = 0; i < PING_SIZE_U32; ++i) {
-            ping_data[i] = offset + i;
+    while (!quit_) {
+        while ((ping_count - pong_count) < 1) {
+            uint32_t offset = (uint32_t) (ping_count * 200);
+            printf("ping %llu %lu %lu\n", ping_count, PING_SIZE_U32 * 4, offset);
+            uint32_t ping_data[PING_SIZE_U32];
+            for (uint32_t i = 0; i < PING_SIZE_U32; ++i) {
+                ping_data[i] = offset + i;
+            }
+            jsdrv_publish(self->context, self->topic.topic, &jsdrv_union_bin((uint8_t *) ping_data, sizeof(ping_data)), 0);
+            ++ping_count;
         }
-        jsdrv_publish(self->context, self->topic.topic, &jsdrv_union_bin((uint8_t *) ping_data, sizeof(ping_data)), 0);
-        Sleep(100);
+        Sleep(1);
     }
-
-    Sleep(1000);
 
     return jsdrv_close(self->context, device, 0);
 }

@@ -1,5 +1,5 @@
 /*
-* Copyright 2022-2024 Jetperch LLC
+* Copyright 2022-2025 Jetperch LLC
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 #define JSDRV_LOG_LEVEL JSDRV_LOG_LEVEL_ALL
 #include "jsdrv.h"
 #include "jsdrv/error_code.h"
+#include "jsdrv/topic.h"
 #include "jsdrv_prv/backend.h"
 #include "jsdrv_prv/cdef.h"
 #include "jsdrv_prv/dbc.h"
@@ -195,7 +196,18 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     return rv;
 }
 
+static void send_to_frontend(struct dev_s * d, const char * subtopic, const struct jsdrv_union_s * value) {
+    struct jsdrvp_msg_s * m;
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, d->ll.prefix);
+    jsdrv_topic_append(&topic, subtopic);
+
+    m = jsdrvp_msg_alloc_value(d->context, topic.topic, value);
+    jsdrvp_backend_send(d->context, m);
+}
+
 static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
+    JSDRV_LOGI("handle link frame: length=%u", length);
     uint8_t msg_type = (uint8_t) (metadata & 0xff);
     switch (msg_type) {
         case MB_LINK_MSG_INVALID:
@@ -209,14 +221,14 @@ static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data,
             break;
         case MB_LINK_MSG_TIMESYNC_RSP:
             JSDRV_LOGW("link msg: timesync response unexpected");
+            // todo
             break;
-            // todo
         case MB_LINK_MSG_PING:
-            // todo
+            // todo respond with pong
             break;
         case MB_LINK_MSG_PONG:
-            JSDRV_LOGI("pong");
-            // todo
+            JSDRV_LOGI("link pong: %lu", data[0]);
+            send_to_frontend(d, "h/link/!pong", &jsdrv_union_bin((uint8_t *) data, length * 4));
             break;
         default:
             JSDRV_LOGW("link msg: unknown %d", msg_type);
@@ -295,10 +307,12 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
 static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
     uint32_t frame_count = (msg->value.size + FRAME_SIZE_BYTES - 1) / FRAME_SIZE_BYTES;
+    JSDRV_LOGI("frame: size=%lu, count=%lu", msg->value.size, frame_count);
     for (uint32_t i = 0; i < frame_count; ++i) {
         uint32_t * p_u32 = (uint32_t *) &msg->value.value.bin[i * FRAME_SIZE_BYTES];
         handle_stream_in_frame(d, p_u32);
     }
+    JSDRV_LOGI("frame done");
 }
 
 static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
