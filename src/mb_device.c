@@ -184,7 +184,6 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     //    // todo error code.
     } else if ((topic[0] == 'h') && (topic[1] == '/')) {
         if (0 == strcmp("h/link/!ping", topic)) {
-            JSDRV_LOGI("PING %d", msg->value.size);
             send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING,
                 (uint32_t *) msg->value.value.bin, (msg->value.size + 3) >> 2);
         } else {
@@ -207,7 +206,7 @@ static void send_to_frontend(struct dev_s * d, const char * subtopic, const stru
 }
 
 static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
-    JSDRV_LOGI("handle link frame: length=%u", length);
+    JSDRV_LOGD3("handle link frame: length=%u", length);
     uint8_t msg_type = (uint8_t) (metadata & 0xff);
     switch (msg_type) {
         case MB_LINK_MSG_INVALID:
@@ -227,7 +226,6 @@ static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data,
             // todo respond with pong
             break;
         case MB_LINK_MSG_PONG:
-            JSDRV_LOGI("link pong: %lu", data[0]);
             send_to_frontend(d, "h/link/!pong", &jsdrv_union_bin((uint8_t *) data, length * 4));
             break;
         default:
@@ -307,12 +305,10 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
 static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
     uint32_t frame_count = (msg->value.size + FRAME_SIZE_BYTES - 1) / FRAME_SIZE_BYTES;
-    JSDRV_LOGI("frame: size=%lu, count=%lu", msg->value.size, frame_count);
     for (uint32_t i = 0; i < frame_count; ++i) {
         uint32_t * p_u32 = (uint32_t *) &msg->value.value.bin[i * FRAME_SIZE_BYTES];
         handle_stream_in_frame(d, p_u32);
     }
-    JSDRV_LOGI("frame done");
 }
 
 static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {

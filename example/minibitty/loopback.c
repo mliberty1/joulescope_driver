@@ -16,10 +16,9 @@
 
 #include "minibitty_exe_prv.h"
 #include "jsdrv/cstr.h"
-#include "jsdrv/version.h"
+#include "jsdrv_prv/platform.h"
 #include <stdio.h>
 #include <string.h>
-#include <inttypes.h>
 
 #include <windows.h>  // todo remove
 
@@ -27,15 +26,35 @@
 
 volatile uint64_t ping_count = 0;
 volatile uint64_t pong_count = 0;
+HANDLE event = NULL;
 
 
 static void on_pong(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) user_data;
+    (void) topic;
     const uint32_t * p_u32 = (const uint32_t *) value->value.bin;
-    printf("pong %llu %lu %lu\n", pong_count, value->size, p_u32[0]);
+    if (value->size != (PING_SIZE_U32 * 4)) {
+        printf("ERROR pong size = %u\n", value->size);
+        quit_ = true;
+        return;
+    }
+    for (uint32_t i = 0; i < PING_SIZE_U32; ++i) {
+        if (p_u32[i] != (uint32_t) (pong_count + i)) {
+            printf("ERROR pong %llu %lu %u\n", pong_count, value->size, i);
+            quit_ = true;
+            return;
+        }
+    }
     pong_count++;
+    SetEvent(event);
 }
 
 static int link_lookback(struct app_s * self, const char * device) {
+    uint64_t pong_prev = 0;
+    int64_t time_prev = jsdrv_time_utc();
+    int64_t time_now = 0;
+    int64_t time_delta = 0;
+
     struct jsdrv_topic_s pong_topic;
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
     Sleep(100);
@@ -46,19 +65,28 @@ static int link_lookback(struct app_s * self, const char * device) {
 
     jsdrv_topic_set(&self->topic, self->device.topic);
     jsdrv_topic_append(&self->topic, "h/link/!ping");
+    fflush(stdout);
 
     while (!quit_) {
-        while ((ping_count - pong_count) < 1) {
-            uint32_t offset = (uint32_t) (ping_count * 200);
-            printf("ping %llu %lu %lu\n", ping_count, PING_SIZE_U32 * 4, offset);
+        ResetEvent(event);
+        while ((ping_count - pong_count) < 1U) {
             uint32_t ping_data[PING_SIZE_U32];
             for (uint32_t i = 0; i < PING_SIZE_U32; ++i) {
-                ping_data[i] = offset + i;
+                ping_data[i] = ping_count + i;
             }
             jsdrv_publish(self->context, self->topic.topic, &jsdrv_union_bin((uint8_t *) ping_data, sizeof(ping_data)), 0);
             ++ping_count;
         }
-        Sleep(1);
+        time_now = jsdrv_time_utc();
+        time_delta = time_now - time_prev;
+        if (time_delta > JSDRV_TIME_SECOND) {
+            uint64_t pong_delta = pong_count - pong_prev;
+            printf("Throughput: %llu frames = %llu bytes\n", pong_delta, pong_delta * PING_SIZE_U32 * 4);
+            fflush(stdout);
+            time_prev = time_now;
+            pong_prev = pong_count;
+        }
+        WaitForSingleObject(event, 1);
     }
 
     return jsdrv_close(self->context, device, 0);
@@ -91,6 +119,12 @@ int on_loopback(struct app_s * self, int argc, char * argv[]) {
 
     ROE(app_match(self, device_filter));
 
+    event = CreateEvent(
+            NULL,  // default security attributes
+            TRUE,  // manual reset event
+            TRUE,  // start signalled to pend initial transactions
+            NULL   // no name
+    );
 
     // todo loopback @ pubsub layer
 
