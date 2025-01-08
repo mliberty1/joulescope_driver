@@ -24,9 +24,19 @@
 
 #define PING_SIZE_U32 ((512U - 12U) >> 2)
 
-volatile uint64_t ping_count = 0;
-volatile uint64_t pong_count = 0;
-HANDLE event = NULL;
+struct loopback_s {
+    volatile uint64_t ping_count;
+    volatile uint64_t pong_count;
+    uint64_t outstanding;
+    HANDLE event;
+};
+
+struct loopback_s loopback_ = {
+    .ping_count = 0,
+    .pong_count = 0,
+    .outstanding = 1,
+    .event = NULL,
+};
 
 
 static void on_pong(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
@@ -39,14 +49,19 @@ static void on_pong(void * user_data, const char * topic, const struct jsdrv_uni
         return;
     }
     for (uint32_t i = 0; i < PING_SIZE_U32; ++i) {
-        if (p_u32[i] != (uint32_t) (pong_count + i)) {
-            printf("ERROR pong %llu %lu %u\n", pong_count, value->size, i);
+        if (p_u32[i] != (uint32_t) (loopback_.pong_count + i)) {
+            if (0 == loopback_.pong_count) {
+                printf("ERROR pong: not yet in sync\n");
+                return;
+            }
+            printf("ERROR pong %llu %lu %u: %lu != %lu\n", loopback_.pong_count, value->size, i,
+                p_u32[i], (uint32_t) (loopback_.pong_count + i));
             quit_ = true;
             return;
         }
     }
-    pong_count++;
-    SetEvent(event);
+    loopback_.pong_count++;
+    SetEvent(loopback_.event);
 }
 
 static int link_lookback(struct app_s * self, const char * device) {
@@ -68,25 +83,25 @@ static int link_lookback(struct app_s * self, const char * device) {
     fflush(stdout);
 
     while (!quit_) {
-        ResetEvent(event);
-        while ((ping_count - pong_count) < 1U) {
+        ResetEvent(loopback_.event);
+        while ((loopback_.ping_count - loopback_.pong_count) < loopback_.outstanding) {
             uint32_t ping_data[PING_SIZE_U32];
             for (uint32_t i = 0; i < PING_SIZE_U32; ++i) {
-                ping_data[i] = ping_count + i;
+                ping_data[i] = loopback_.ping_count + i;
             }
             jsdrv_publish(self->context, self->topic.topic, &jsdrv_union_bin((uint8_t *) ping_data, sizeof(ping_data)), 0);
-            ++ping_count;
+            ++loopback_.ping_count;
         }
         time_now = jsdrv_time_utc();
         time_delta = time_now - time_prev;
         if (time_delta > JSDRV_TIME_SECOND) {
-            uint64_t pong_delta = pong_count - pong_prev;
+            uint64_t pong_delta = loopback_.pong_count - pong_prev;
             printf("Throughput: %llu frames = %llu bytes\n", pong_delta, pong_delta * PING_SIZE_U32 * 4);
             fflush(stdout);
             time_prev = time_now;
-            pong_prev = pong_count;
+            pong_prev = loopback_.pong_count;
         }
-        WaitForSingleObject(event, 1);
+        WaitForSingleObject(loopback_.event, 1);
     }
 
     return jsdrv_close(self->context, device, 0);
@@ -107,6 +122,15 @@ int on_loopback(struct app_s * self, int argc, char * argv[]) {
         } else if ((0 == strcmp(argv[0], "--verbose")) || (0 == strcmp(argv[0], "-v"))) {
             self->verbose++;
             ARG_CONSUME();
+        } else if ((0 == strcmp(argv[0], "--outstanding")) || (0 == strcmp(argv[0], "-o"))) {
+            self->verbose++;
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            if (jsdrv_cstr_to_u64(argv[0], &loopback_.outstanding)) {
+                printf("ERROR: invalid --outstanding value\n");
+                return usage();
+            }
+            ARG_CONSUME();
         } else {
             return usage();
         }
@@ -119,7 +143,7 @@ int on_loopback(struct app_s * self, int argc, char * argv[]) {
 
     ROE(app_match(self, device_filter));
 
-    event = CreateEvent(
+    loopback_.event = CreateEvent(
             NULL,  // default security attributes
             TRUE,  // manual reset event
             TRUE,  // start signalled to pend initial transactions
