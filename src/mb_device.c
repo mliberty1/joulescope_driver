@@ -25,13 +25,20 @@
 #include "jsdrv_prv/msg_queue.h"
 #include "jsdrv_prv/thread.h"
 #include <inttypes.h>
+#include <jsdrv/cstr.h>
 
 #include "mb/comm/frame.h"
 #include "mb/comm/link.h"
 
 
-#define FRAME_SIZE_BYTES           (512U)
-#define PAYLOAD_SIZE_U32_MAX       (FRAME_SIZE_BYTES / sizeof(uint32_t) - 3U)
+#define FRAME_SIZE_U8           (512U)
+#define FRAME_HEADER_SIZE_U8    (8U)
+#define FRAME_FOOTER_SIZE_U8    (4U)
+#define FRAME_OVERHEAD_U8       (FRAME_HEADER_SIZE_U8 + FRAME_FOOTER_SIZE_U8)
+#define FRAME_OVERHEAD_U32      (FRAME_OVERHEAD_U8 >> 2)
+#define PAYLOAD_SIZE_MAX_U8     (FRAME_SIZE_U8 - FRAME_OVERHEAD_U8)
+#define PAYLOAD_SIZE_MAX_U32    (PAYLOAD_SIZE_MAX_U8 >> 2)
+#define MB_TOPIC_SIZE_MAX       (32U)
 
 // todo move to an appropriate place
 #define MB_USB_EP_BULK_IN  0x82
@@ -113,20 +120,26 @@ static int32_t d_close(struct dev_s * d) {
     return rv;
 }
 
-static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
-                           const uint32_t * data, uint32_t length) {
-    JSDRV_DBC_NOT_NULL(data);
-    JSDRV_DBC_EQUAL(service_type, service_type & 0x0f);
-    if ((length == 0) || (length > PAYLOAD_SIZE_U32_MAX)) {
-        JSDRV_LOGE("send_to_device: invalid length %ul", length);
-        return;
+/**
+ * @brief Allocate a Minibitty frame message with specified payload size.
+ *
+ * @param d The target device.
+ * @param service_type The mb_frame_service_type_e
+ * @param length_u32 The payload length in u32 words.
+ * @param metadata The 16-bit metadata value.
+ * @return The allocated message or NULL on failure.
+ */
+static struct jsdrvp_msg_s * msg_alloc_send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint8_t length_u32, uint16_t metadata) {
+    if ((length_u32 == 0) || (length_u32 > PAYLOAD_SIZE_MAX_U32)) {
+        JSDRV_LOGE("send_to_device: invalid length %ul", length_u32);
+        return NULL;
     }
-    uint32_t length_u32 = length + 3;  // header and check
+
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_OUT_DATA, &jsdrv_union_i32(0));
     m->value.type = JSDRV_UNION_BIN;
     m->value.value.bin = m->payload.bin;
     m->extra.bkusb_stream.endpoint = MB_USB_EP_BULK_OUT;
-    m->value.size = length_u32 << 2;
+    m->value.size = (length_u32 + FRAME_OVERHEAD_U32) << 2;
     uint8_t * data_u8 = m->payload.bin;
     uint16_t * data_u16 = (uint16_t *) data_u8;
     uint32_t * data_u32 =  (uint32_t *) data_u8;
@@ -135,11 +148,51 @@ static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e servic
     data_u8[1] = MB_FRAMER_SOF2 | service_type;
     data_u16[1] = (MB_FRAME_FT_DATA << 11) | (d->out_frame_id & MB_FRAMER_FRAME_ID_MAX);
     d->out_frame_id = (d->out_frame_id + 1) & MB_FRAMER_FRAME_ID_MAX;
-    data_u8[4] = length - 1;
-    data_u8[5] = mb_frame_length_check(length - 1);
+    data_u8[4] = length_u32 - 1;
+    data_u8[5] = mb_frame_length_check(length_u32 - 1);
     data_u16[3] = metadata;
-    memcpy(&data_u8[8], data, length << 2);
-    data_u32[length_u32 - 1] = 0;  // no frame_check on USB
+    data_u32[length_u32 + 2] = 0;  // no frame_check on USB
+    return m;
+}
+
+static void send_to_device(struct dev_s * d, enum mb_frame_service_type_e service_type, uint16_t metadata,
+                           const uint32_t * data, uint32_t length_u32) {
+    JSDRV_DBC_NOT_NULL(data);
+    struct jsdrvp_msg_s * m = msg_alloc_send_to_device(d, service_type, length_u32, metadata);
+    if (!m) {
+        return;
+    }
+    uint8_t * data_u8 = &m->payload.bin[FRAME_HEADER_SIZE_U8];
+    memcpy(data_u8, data, length_u32 << 2);
+    msg_queue_push(d->ll.cmd_q, m);
+}
+
+static void publish_to_device(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value) {
+    uint32_t value_size = (value->size < 8) ? 8 : value->size;  // keep things simple
+    uint32_t length_u8 = MB_TOPIC_SIZE_MAX + value_size;  // topic and value
+    uint32_t length_u32 = (length_u8 + 3) >> 2;  // round up
+    uint16_t metadata = ((value->type) & 0x00ffU) | ((length_u8 & 0x0003U) << 8);
+    struct jsdrvp_msg_s * m = msg_alloc_send_to_device(d, MB_FRAME_ST_PUBSUB, length_u32, metadata);
+    if (!m) {
+        return;
+    }
+
+    // populate topic
+    uint8_t * data_u8 = &m->payload.bin[FRAME_HEADER_SIZE_U8];
+    memset(data_u8, 0, MB_TOPIC_SIZE_MAX);
+    jsdrv_cstr_copy((char *) data_u8, topic, MB_TOPIC_SIZE_MAX);
+    data_u8 += MB_TOPIC_SIZE_MAX;
+
+    // populate value
+    if ((value->type == JSDRV_UNION_JSON) || (value->type == JSDRV_UNION_STR)) {
+        if (jsdrv_cstr_copy((char *) data_u8, value->value.str, (PAYLOAD_SIZE_MAX_U8 - MB_TOPIC_SIZE_MAX))) {
+            JSDRV_LOGW("bulk_out_publish(%s) string truncated", topic);
+        }
+    } else if (value->type == JSDRV_UNION_BIN) {
+        memcpy(data_u8, value->value.bin, value->size);
+    } else {
+        memcpy(data_u8, &value->value.u64, sizeof(uint64_t));
+    }
     msg_queue_push(d->ll.cmd_q, m);
 }
 
@@ -182,7 +235,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         }
     //} else if (d->state != ST_OPEN) {
     //    // todo error code.
-    } else if ((topic[0] == 'h') && (topic[1] == '/')) {
+    } else if (((topic[0] == 'h') || (topic[0] == '.')) && (topic[1] == '/')) {
         if (0 == strcmp("h/link/!ping", topic)) {
             send_to_device(d, MB_FRAME_ST_LINK, MB_LINK_MSG_PING,
                 (uint32_t *) msg->value.value.bin, (msg->value.size + 3) >> 2);
@@ -190,18 +243,17 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
             JSDRV_LOGE("topic invalid: %s", msg->topic);
         }
     } else {
-        // todo publish.
+        publish_to_device(d, topic, &msg->value);
     }
     return rv;
 }
 
 static void send_to_frontend(struct dev_s * d, const char * subtopic, const struct jsdrv_union_s * value) {
-    struct jsdrvp_msg_s * m;
     struct jsdrv_topic_s topic;
     jsdrv_topic_set(&topic, d->ll.prefix);
     jsdrv_topic_append(&topic, subtopic);
 
-    m = jsdrvp_msg_alloc_value(d->context, topic.topic, value);
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, topic.topic, value);
     jsdrvp_backend_send(d->context, m);
 }
 
@@ -243,11 +295,31 @@ static void handle_in_trace(struct dev_s * d, uint16_t metadata, uint32_t * data
 }
 
 static void handle_in_pubsub(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
-    (void) d;
-    (void) metadata;
-    (void) data;
-    (void) length;
-    // todo
+    // process metadata and size
+    uint8_t value_type = metadata & 0x00ffU;
+    uint8_t size_lsb = (metadata >> 8) & 0x0003U;
+    uint32_t size = (((uint32_t) length) << 2) - MB_TOPIC_SIZE_MAX;
+    if (size_lsb) {
+        size = size - 4 + size_lsb;
+    }
+
+    // process topic
+    struct jsdrv_topic_s topic;
+    jsdrv_topic_set(&topic, d->ll.prefix);
+    jsdrv_topic_append(&topic, (const char * ) data);
+    data += (MB_TOPIC_SIZE_MAX >> 2);
+
+    // process value
+    struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, topic.topic, &jsdrv_union_bin(NULL, 0));
+    m->value.size = size;
+    if ((value_type == JSDRV_UNION_STR) || (value_type == JSDRV_UNION_JSON) || (value_type == JSDRV_UNION_BIN)) {
+        JSDRV_ASSERT(size <= JSDRV_PAYLOAD_LENGTH_MAX);  // always true
+        m->value.value.bin = m->payload.bin;
+        memcpy(m->payload.bin, data, m->value.size);
+    } else {
+        m->value.value.u64 = *((uint64_t *) data);
+    }
+    jsdrvp_backend_send(d->context, m);
 }
 
 static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
@@ -304,9 +376,9 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
 
 static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     JSDRV_ASSERT(msg->value.type == JSDRV_UNION_BIN);
-    uint32_t frame_count = (msg->value.size + FRAME_SIZE_BYTES - 1) / FRAME_SIZE_BYTES;
+    uint32_t frame_count = (msg->value.size + FRAME_SIZE_U8 - 1) / FRAME_SIZE_U8;
     for (uint32_t i = 0; i < frame_count; ++i) {
-        uint32_t * p_u32 = (uint32_t *) &msg->value.value.bin[i * FRAME_SIZE_BYTES];
+        uint32_t * p_u32 = (uint32_t *) &msg->value.value.bin[i * FRAME_SIZE_U8];
         handle_stream_in_frame(d, p_u32);
     }
 }

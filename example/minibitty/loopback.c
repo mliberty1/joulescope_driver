@@ -22,8 +22,10 @@
 
 #include <windows.h>  // todo remove
 
+
+#define MB_TOPIC_LENGTH_MAX (32U)
 #define LINK_PING_SIZE_U32 ((512U - 12U) >> 2)
-#define PUBSUB_PING_SIZE_U32 ((256U) >> 2)
+#define PUBSUB_PING_SIZE_U32 ((512U - 12U - MB_TOPIC_LENGTH_MAX) >> 2)
 
 
 enum loopback_location_e {
@@ -36,10 +38,10 @@ struct loopback_s {
     uint64_t count;                 // total count
     uint64_t outstanding;           // outstanding messages in flight
     uint64_t size_u32;              // size of ping data in u32
+    char topic[JSDRV_TOPIC_LENGTH_MAX];
     volatile uint64_t ping_count;   // current TX ping count
     volatile uint64_t pong_count;   // current RX pong count
     HANDLE event;
-    uint8_t location;              // loopback_location_e
 };
 
 struct loopback_s loopback_ = {
@@ -49,7 +51,6 @@ struct loopback_s loopback_ = {
     .ping_count = 0,
     .pong_count = 0,
     .event = NULL,
-    .location = LOCATION_LINK,
 };
 
 
@@ -65,7 +66,9 @@ static void on_pong(void * user_data, const char * topic, const struct jsdrv_uni
     for (uint32_t i = 0; i < loopback_.size_u32; ++i) {
         if (p_u32[i] != (uint32_t) (loopback_.pong_count + i)) {
             if (0 == loopback_.pong_count) {
-                printf("ERROR pong: not yet in sync\n");
+                printf("ERROR pong unsynced: %llu %lu %u: %lu != %lu\n",
+                    loopback_.pong_count, value->size, i,
+                    p_u32[i], (uint32_t) (loopback_.pong_count + i));
                 return;
             }
             printf("ERROR pong %llu %lu %u: %lu != %lu\n", loopback_.pong_count, value->size, i,
@@ -88,19 +91,10 @@ static int link_lookback(struct app_s * self, const char * device) {
 
     jsdrv_topic_set(&ping_topic, self->device.topic);
     jsdrv_topic_set(&pong_topic, self->device.topic);
-
-    switch (loopback_.location) {
-        case LOCATION_LINK:
-            jsdrv_topic_append(&ping_topic, "h/link/!ping");
-            jsdrv_topic_append(&pong_topic, "h/link/!pong");
-            break;
-        case LOCATION_PUBSUB:
-            jsdrv_topic_append(&ping_topic, "c/./!ping");  // how do we know it is c?
-            jsdrv_topic_append(&pong_topic, "c/./!pong");
-            break;
-        default:
-            printf("ERROR: invalid loopback location\n");
-    }
+    jsdrv_topic_append(&ping_topic, loopback_.topic);
+    jsdrv_topic_append(&pong_topic, loopback_.topic);
+    jsdrv_topic_append(&ping_topic, "!ping");
+    jsdrv_topic_append(&pong_topic, "!pong");
 
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
     Sleep(100);
@@ -143,15 +137,16 @@ static int usage(void) {
     printf(
         "usage: minibitty loopback [options] device_path\n"
         "options:\n"
-        "  --count {n}        The total number of messages to send.\n"
-        "  --outstanding {n}  The number of in-flight messages.\n"
-        "  --location {s}     The loopback location: link, pubsub\n"
+        "  --count {n}        The total number of messages to send. [0]\n"
+        "  --outstanding {n}  The number of in-flight messages. [1]\n"
+        "  --topic {t}        The loopback topic prefix [h/link]\n"
         );
     return 1;
 }
 
 int on_loopback(struct app_s * self, int argc, char * argv[]) {
     char *device_filter = NULL;
+    jsdrv_cstr_copy(loopback_.topic, "h/link", sizeof(loopback_.topic));
 
     while (argc) {
         if (argv[0][0] != '-') {
@@ -178,19 +173,17 @@ int on_loopback(struct app_s * self, int argc, char * argv[]) {
                 return usage();
             }
             ARG_CONSUME();
-        } else if ((0 == strcmp(argv[0], "--location")) || (0 == strcmp(argv[0], "-l"))) {
+        } else if ((0 == strcmp(argv[0], "--topic")) || (0 == strcmp(argv[0], "-t"))) {
             self->verbose++;
             ARG_CONSUME();
             ARG_REQUIRE();
-            if (0 == jsdrv_cstr_casecmp(argv[0], "link")) {
-                loopback_.location = LOCATION_LINK;
+            if (jsdrv_cstr_copy(loopback_.topic, argv[0], sizeof(loopback_.topic))) {
+                printf("ERROR: invalid --topic value\n");
+            }
+            if (0 == jsdrv_cstr_casecmp(argv[0], "h/link")) {
                 loopback_.size_u32 = LINK_PING_SIZE_U32;
-            } else if (0 == jsdrv_cstr_casecmp(argv[0], "pubsub")) {
-                loopback_.location = LOCATION_PUBSUB;
-                loopback_.size_u32 = PUBSUB_PING_SIZE_U32;
             } else {
-                printf("ERROR: invalid --location value\n");
-                return usage();
+                loopback_.size_u32 = PUBSUB_PING_SIZE_U32;
             }
             ARG_CONSUME();
         } else {

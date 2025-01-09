@@ -68,6 +68,7 @@ add_executable(frontend_test frontend_test.c
         ../src/js110_usb.c
         ../src/js220_usb.c
         ../src/js220_params.c
+        ../src/mb_device.c
         ../src/jsdrv.c)
 set_target_properties(frontend_test PROPERTIES COMPILE_DEFINITIONS "UNITTEST=1;")
 add_dependencies(frontend_test jsdrv_support_objlib tinyprintf cmocka)

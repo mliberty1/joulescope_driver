@@ -69,7 +69,7 @@ int on_set(struct app_s * self, int argc, char * argv[]) {
                 return usage();
             }
             ROE(app_match(self, device_filter));
-            ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME));
+            ROE(jsdrv_open(self->context, self->device.topic, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
             ARG_CONSUME();
         } else {
             if (set_arg(self, self->device.topic, argv[0])) {
@@ -80,7 +80,7 @@ int on_set(struct app_s * self, int argc, char * argv[]) {
     }
 
     if (self->device.topic[0]) {
-        jsdrv_close(self->context, self->device.topic);
+        jsdrv_close(self->context, self->device.topic, 0);
     }
 
     return 0;

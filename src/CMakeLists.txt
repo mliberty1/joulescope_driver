@@ -56,7 +56,6 @@ set(SUPPORT_SOURCES
         js220_stats.c
         json.c
         log.c
-        mb_device.c
         pubsub.c
         meta.c
         sample_buffer_f32.c
@@ -76,6 +75,7 @@ set(SOURCES
         js110_usb.c
         js220_usb.c
         js220_params.c
+        mb_device.c
         jsdrv.c
         ${PLATFORM_SRC}
 )

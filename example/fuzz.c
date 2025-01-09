@@ -154,7 +154,7 @@ static int32_t t_open(struct app_s * self) {
     uint32_t device_idx = random_range_u32(0, device_count);
     snprintf(self->device_prefix, sizeof(self->device_prefix), "%s", devices[device_idx]);
     printf("open %s\n", self->device_prefix);
-    rc = jsdrv_open(self->context, self->device_prefix, 0);
+    rc = jsdrv_open(self->context, self->device_prefix, 0, 0);
     if (0 == rc) {
         state_update(self, ST_OPEN);
     }
@@ -165,7 +165,7 @@ static int32_t t_close(struct app_s * self) {
     int32_t rc = 0;
     if (self->device_prefix[0]) {
         printf("close %s\n", self->device_prefix);
-        rc = jsdrv_close(self->context, self->device_prefix);
+        rc = jsdrv_close(self->context, self->device_prefix, 0);
     }
     self->device_prefix[0] = 0;
     state_update(self, ST_INITIALIZED);
