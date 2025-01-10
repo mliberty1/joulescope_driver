@@ -264,22 +264,14 @@ static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data,
         case MB_LINK_MSG_INVALID:
             JSDRV_LOGW("link msg: invalid");
             break;
-        case MB_LINK_MSG_STATUS:
-            // todo
-            break;
-        case MB_LINK_MSG_TIMESYNC_REQ:
-            // todo
-            break;
-        case MB_LINK_MSG_TIMESYNC_RSP:
-            JSDRV_LOGW("link msg: timesync response unexpected");
-            // todo
-            break;
         case MB_LINK_MSG_PING:
             // todo respond with pong
             break;
         case MB_LINK_MSG_PONG:
             send_to_frontend(d, "h/link/!pong", &jsdrv_union_bin((uint8_t *) data, length * 4));
             break;
+        case MB_LINK_MSG_THROUGHPUT:
+            break;  // use message statistics
         default:
             JSDRV_LOGW("link msg: unknown %d", msg_type);
             break;
