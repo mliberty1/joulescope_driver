@@ -130,7 +130,9 @@ static int link_lookback(struct app_s * self, const char * device) {
         WaitForSingleObject(loopback_.event, 1);
     }
 
-    return jsdrv_close(self->context, device, 0);
+    jsdrv_close(self->context, device, 0);
+    Sleep(250);
+    return 0;
 }
 
 static int usage(void) {

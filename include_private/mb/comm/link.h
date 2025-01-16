@@ -45,7 +45,6 @@ enum mb_link_msg_e {
     MB_LINK_MSG_INVALID = 0,
     MB_LINK_MSG_PING = 1,           // ping test, response with pong
     MB_LINK_MSG_PONG = 2,           // response to ping
-    MB_LINK_MSG_THROUGHPUT = 3,     // throughput testing
 };
 MB_CPP_GUARD_END
 
