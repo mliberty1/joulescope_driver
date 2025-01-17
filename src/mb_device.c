@@ -50,6 +50,7 @@ enum events_e {
     EV_STATE_EXIT,
 
     EV_RESET,
+    EV_ADVANCE,
 
     EV_LINK_RESET_REQ,
     EV_LINK_RESET_ACK,
@@ -61,7 +62,6 @@ enum events_e {
     EV_BACKEND_OPEN_BULK_ACK,
     EV_BACKEND_OPEN_BULK_NACK,
     EV_BACKEND_CLOSE_ACK,
-    EV_BACKEND_CLOSE_BULK_ACK,
 
     EV_API_OPEN_REQUEST,
     EV_API_CLOSE_REQUEST,
@@ -79,7 +79,7 @@ enum state_e {
 
     // graceful disconnect
     ST_LINK_DISCONNECT,
-    ST_LL_BULK_CLOSE,
+    ST_LL_CLOSE_PEND,
     ST_LL_CLOSE,
 
     ST_FINALIZED,
@@ -113,6 +113,8 @@ struct state_machine_state_s {
     state_machine_fn on_exit;
     struct state_machine_transition_s const * const transitions;
 };
+
+static void send_to_frontend(struct dev_s * d, const char * subtopic, const struct jsdrv_union_s * value);
 
 static void send_frame_ctrl_to_device(struct dev_s * d, uint8_t ctrl) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_OUT_DATA, &jsdrv_union_i32(0));
@@ -182,15 +184,6 @@ static bool on_link_disconnect(struct dev_s * self, uint8_t event) {
     return true;
 }
 
-static bool on_ll_bulk_close(struct dev_s * self, uint8_t event) {
-    (void) event;
-    struct jsdrvp_msg_s * m;
-    m = jsdrvp_msg_alloc_value(self->context, JSDRV_USBBK_MSG_BULK_IN_STREAM_CLOSE, &jsdrv_union_i32(0));
-    m->extra.bkusb_stream.endpoint = MB_USB_EP_BULK_IN;
-    msg_queue_push(self->ll.cmd_q, m);
-    return true;
-}
-
 static bool on_ll_close(struct dev_s * self, uint8_t event) {
     (void) event;
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(self->context, JSDRV_MSG_CLOSE, &jsdrv_union_i32(0));
@@ -198,9 +191,33 @@ static bool on_ll_close(struct dev_s * self, uint8_t event) {
     return true;
 }
 
-static bool is_finalizing(struct dev_s * self, uint8_t event) {
+static bool guard_is_finalizing(struct dev_s * self, uint8_t event) {
     (void) event;
     return self->finalize_pending;
+}
+
+static bool guard_open_fail(struct dev_s * self, uint8_t event) {
+    (void) event;
+    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(1));
+    return true;
+}
+
+static bool guard_close_fail(struct dev_s * self, uint8_t event) {
+    (void) event;
+    send_to_frontend(self, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(1));
+    return true;
+}
+
+static bool guard_open_success(struct dev_s * self, uint8_t event) {
+    (void) event;
+    send_to_frontend(self, JSDRV_MSG_OPEN "#", &jsdrv_union_i32(0));
+    return true;
+}
+
+static bool guard_close_success(struct dev_s * self, uint8_t event) {
+    (void) event;
+    send_to_frontend(self, JSDRV_MSG_CLOSE "#", &jsdrv_union_i32(0));
+    return true;
 }
 
 #define TRANSITION_END {0, 0, NULL}
@@ -212,7 +229,8 @@ const struct state_machine_transition_s state_machine_global[] = {
 };
 
 const struct state_machine_transition_s state_machine_not_present[] = {
-    {EV_API_OPEN_REQUEST, ST_LL_OPEN, NULL},
+    {EV_API_OPEN_REQUEST, ST_NOT_PRESENT, guard_open_fail},
+    {EV_API_CLOSE_REQUEST, ST_NOT_PRESENT, guard_close_fail},
     TRANSITION_END
 };
 
@@ -230,15 +248,15 @@ const struct state_machine_transition_s state_machine_ll_open[] = {
 
 const struct state_machine_transition_s state_machine_ll_bulk_open[] = {
     {EV_BACKEND_OPEN_BULK_ACK, ST_LINK_RESET, NULL},
-    {EV_BACKEND_OPEN_BULK_NACK, ST_LL_BULK_CLOSE, NULL},
-    {EV_API_CLOSE_REQUEST, ST_LL_BULK_CLOSE, NULL},
+    {EV_BACKEND_OPEN_BULK_NACK, ST_LL_CLOSE, NULL},
+    {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_link_reset[] = {
     {EV_LINK_RESET_REQ, ST_INVALID, on_link_reset_req},  // respond with ack
-    {EV_LINK_RESET_ACK, ST_OPEN, NULL},
-    {EV_API_CLOSE_REQUEST, ST_LL_BULK_CLOSE, NULL},
+    {EV_LINK_RESET_ACK, ST_OPEN, guard_open_success},
+    {EV_API_CLOSE_REQUEST, ST_LL_CLOSE, NULL},
     TRANSITION_END
 };
 
@@ -248,18 +266,18 @@ const struct state_machine_transition_s state_machine_open[] = {
 };
 
 const struct state_machine_transition_s state_machine_link_disconnect[] = {
-    {EV_LINK_DISCONNECT_ACK, ST_LL_BULK_CLOSE, NULL},
+    {EV_LINK_DISCONNECT_ACK, ST_LL_CLOSE_PEND, NULL},
     TRANSITION_END
 };
 
-const struct state_machine_transition_s state_machine_ll_bulk_close[] = {
-    {EV_BACKEND_CLOSE_BULK_ACK, ST_LL_CLOSE, NULL},
+const struct state_machine_transition_s state_machine_ll_close_pend[] = {
+    {EV_ADVANCE, ST_LL_CLOSE, NULL},
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_ll_close[] = {
-    {EV_BACKEND_CLOSE_ACK, ST_FINALIZED, is_finalizing},
-    {EV_BACKEND_CLOSE_ACK, ST_CLOSED, NULL},
+    {EV_BACKEND_CLOSE_ACK, ST_FINALIZED, guard_is_finalizing},
+    {EV_BACKEND_CLOSE_ACK, ST_CLOSED, guard_close_success},
     TRANSITION_END
 };
 
@@ -276,7 +294,7 @@ const struct state_machine_state_s state_machine_states[] = {
     {ST_LINK_RESET, "link_reset", on_link_reset, NULL, state_machine_link_reset},
     {ST_OPEN, "open", on_open, NULL, state_machine_open},
     {ST_LINK_DISCONNECT, "link_disconnect", on_link_disconnect, NULL, state_machine_link_disconnect},
-    {ST_LL_BULK_CLOSE, "ll_bulk_close", on_ll_bulk_close, NULL, state_machine_ll_bulk_close},
+    {ST_LL_CLOSE_PEND, "ll_close_pend", NULL, NULL, state_machine_ll_close_pend},
     {ST_LL_CLOSE, "ll_close", on_ll_close, NULL, state_machine_ll_close},
     {ST_FINALIZED, "finalized", NULL, NULL, state_machine_end},
     {0, NULL, NULL, NULL},
@@ -545,6 +563,7 @@ static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
             JSDRV_LOGW("unsupported link control: %d", ctrl);
             return;
     }
+    JSDRV_LOGI("link frame: ctrl=%d -> event=%d", ctrl, event);
     state_machine_process(d, event);
 }
 
@@ -622,6 +641,7 @@ static void handle_stream_in(struct dev_s * d, struct jsdrvp_msg_s * msg) {
 
 static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     bool rv = true;
+    uint8_t event = 0;
     if (!msg) {
         return false;
     }
@@ -634,19 +654,17 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGD2("stream_out_data done");
         // no action necessary
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_IN_STREAM_OPEN, msg->topic)) {
-        uint8_t event = (0 == msg->value.value.u32) ? EV_BACKEND_OPEN_BULK_ACK : EV_BACKEND_OPEN_BULK_NACK;
-        state_machine_process(d, event);
+        event = (0 == msg->value.value.u32) ? EV_BACKEND_OPEN_BULK_ACK : EV_BACKEND_OPEN_BULK_NACK;
     } else if (0 == strcmp(JSDRV_USBBK_MSG_BULK_IN_STREAM_CLOSE, msg->topic)) {
-        state_machine_process(d, EV_BACKEND_CLOSE_BULK_ACK);
+        // ignore, close will clean up
     } else if (msg->topic[0] == JSDRV_MSG_COMMAND_PREFIX_CHAR) {
         if (0 == strcmp(JSDRV_MSG_OPEN, msg->topic)) {
-            uint8_t event = (0 == msg->value.value.u32) ? EV_BACKEND_OPEN_ACK : EV_BACKEND_OPEN_NACK;
-            state_machine_process(d, event);
+            event = (0 == msg->value.value.u32) ? EV_BACKEND_OPEN_ACK : EV_BACKEND_OPEN_NACK;
         } else if (0 == strcmp(JSDRV_MSG_CLOSE, msg->topic)) {
-            state_machine_process(d, EV_BACKEND_CLOSE_ACK);
+            event = EV_BACKEND_CLOSE_ACK;
         } else if (0 == strcmp(JSDRV_MSG_FINALIZE, msg->topic)) {
             d->finalize_pending = true;
-            state_machine_process(d, EV_API_CLOSE_REQUEST);
+            event = EV_API_CLOSE_REQUEST;
         } else {
             JSDRV_LOGE("handle_rsp unsupported %s", msg->topic);
         }
@@ -654,6 +672,9 @@ static bool handle_rsp(struct dev_s * d, struct jsdrvp_msg_s * msg) {
         JSDRV_LOGE("handle_rsp unsupported %s", msg->topic);
     }
     jsdrvp_msg_free(d->context, msg);
+    if (event) {
+        state_machine_process(d, event);
+    }
     return rv;
 }
 
@@ -690,6 +711,10 @@ static THREAD_RETURN_TYPE driver_thread(THREAD_ARG_TYPE lpParam) {
         // note: ResetEvent handled automatically by msg_queue_pop_immediate
         while (handle_rsp(d, msg_queue_pop_immediate(d->ll.rsp_q))) {
             ;
+        }
+
+        if (d->state == ST_LL_CLOSE_PEND) {
+            state_machine_process(d, EV_ADVANCE);
         }
     }
 

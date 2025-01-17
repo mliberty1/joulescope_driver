@@ -96,8 +96,7 @@ static int link_lookback(struct app_s * self, const char * device) {
     jsdrv_topic_append(&ping_topic, "!ping");
     jsdrv_topic_append(&pong_topic, "!pong");
 
-    ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, 0));
-    Sleep(100);
+    ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
     jsdrv_subscribe(self->context, pong_topic.topic, JSDRV_SFLAG_PUB, on_pong, NULL, 0);
     fflush(stdout);
 
@@ -130,8 +129,7 @@ static int link_lookback(struct app_s * self, const char * device) {
         WaitForSingleObject(loopback_.event, 1);
     }
 
-    jsdrv_close(self->context, device, 0);
-    Sleep(250);
+    jsdrv_close(self->context, device, JSDRV_TIMEOUT_MS_DEFAULT);
     return 0;
 }
 
