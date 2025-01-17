@@ -53,6 +53,12 @@ struct loopback_s loopback_ = {
     .event = NULL,
 };
 
+static void on_device_stats(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+    (void) user_data;
+    uint32_t * p_u32 = (uint32_t *) value->value.bin;
+    printf("%s: %d\n", topic, p_u32[7]);
+}
+
 
 static void on_pong(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
@@ -84,6 +90,7 @@ static void on_pong(void * user_data, const char * topic, const struct jsdrv_uni
 static int link_lookback(struct app_s * self, const char * device) {
     struct jsdrv_topic_s pong_topic;
     struct jsdrv_topic_s ping_topic;
+    struct jsdrv_topic_s topic;
     uint64_t pong_prev = 0;
     int64_t time_prev = jsdrv_time_utc();
     int64_t time_now = 0;
@@ -98,6 +105,15 @@ static int link_lookback(struct app_s * self, const char * device) {
 
     ROE(jsdrv_open(self->context, device, JSDRV_DEVICE_OPEN_MODE_RESUME, JSDRV_TIMEOUT_MS_DEFAULT));
     jsdrv_subscribe(self->context, pong_topic.topic, JSDRV_SFLAG_PUB, on_pong, NULL, 0);
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "c/comm/usbd/0/tx/!stat");
+    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_device_stats, NULL, 0);
+
+    jsdrv_topic_set(&topic, self->device.topic);
+    jsdrv_topic_append(&topic, "c/comm/usbd/0/rx/!stat");
+    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_device_stats, NULL, 0);
+
     fflush(stdout);
 
     while (!quit_) {
