@@ -39,6 +39,7 @@ add_executable(minibitty_exe
         minibitty/hotplug.c
         minibitty/info.c
         minibitty/loopback.c
+        minibitty/throughput.c
         minibitty/version.c
 )
 add_dependencies(minibitty_exe jsdrv)

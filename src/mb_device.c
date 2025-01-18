@@ -510,6 +510,14 @@ static void handle_in_trace(struct dev_s * d, uint16_t metadata, uint32_t * data
     // todo
 }
 
+static void handle_in_throughput(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
+    (void) d;
+    (void) metadata;
+    (void) data;
+    (void) length;
+    // todo
+}
+
 static void handle_in_pubsub(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
     // process metadata and size
     uint8_t value_type = metadata & 0x00ffU;
@@ -624,6 +632,9 @@ static void handle_stream_in_frame(struct dev_s * d, uint32_t * p_u32) {
             break;
         case MB_FRAME_ST_PUBSUB:
             handle_in_pubsub(d, metadata, p_u32 + 2, length + 1);
+            break;
+        case MB_FRAME_ST_COMM_THROUGHPUT:
+            handle_in_throughput(d, metadata, p_u32 + 2, length + 1);
             break;
         default:
             JSDRV_LOGW("unsupported service type %d", (int) service_type);

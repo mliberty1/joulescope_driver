@@ -137,6 +137,8 @@ enum mb_frame_service_type_e {
      *   - value: N bytes
      */
     MB_FRAME_ST_PUBSUB = 3,
+
+    MB_FRAME_ST_COMM_THROUGHPUT = 4,
 };
 
 /**
