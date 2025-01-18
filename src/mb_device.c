@@ -470,6 +470,7 @@ static bool handle_cmd(struct dev_s * d, struct jsdrvp_msg_s * msg) {
     } else {
         publish_to_device(d, topic, &msg->value);
     }
+    jsdrvp_msg_free(d->context, msg);
     return rv;
 }
 
