@@ -32,17 +32,32 @@ static void on_device_stats(void * user_data, const char * topic, const struct j
 static int usage(void) {
     printf(
         "usage: minibitty throughput [options] device_path\n"
+        "options:\n"
+        "  --outstanding {n}  The number of in-flight messages. [1]\n"
         );
     return 1;
 }
 
 int on_throughput(struct app_s * self, int argc, char * argv[]) {
+    uint64_t outstanding = 1;
     struct jsdrv_topic_s topic;
     char *device_filter = NULL;
 
     while (argc) {
         if (argv[0][0] != '-') {
             device_filter = argv[0];
+            ARG_CONSUME();
+        } else if ((0 == strcmp(argv[0], "--outstanding")) || (0 == strcmp(argv[0], "-o"))) {
+            self->verbose++;
+            ARG_CONSUME();
+            ARG_REQUIRE();
+            if (jsdrv_cstr_to_u64(argv[0], &outstanding)) {
+                printf("ERROR: invalid --outstanding value\n");
+                return usage();
+            } else if (outstanding > 128) {
+                printf("ERROR: --outstanding value to big (<= 128)\n");
+                return usage();
+            }
             ARG_CONSUME();
         } else {
             return usage();
@@ -68,7 +83,7 @@ int on_throughput(struct app_s * self, int argc, char * argv[]) {
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "c/comm/tpt/0/tx/cnt");
-    jsdrv_publish(self->context, topic.topic, &jsdrv_union_u8(1), 0);
+    jsdrv_publish(self->context, topic.topic, &jsdrv_union_u8(outstanding), 0);
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "c/comm/tpt/0/tx/sz");
