@@ -39,6 +39,7 @@
 #define PAYLOAD_SIZE_MAX_U8     (FRAME_SIZE_U8 - FRAME_OVERHEAD_U8)
 #define PAYLOAD_SIZE_MAX_U32    (PAYLOAD_SIZE_MAX_U8 >> 2)
 #define MB_TOPIC_SIZE_MAX       (32U)
+#define PUBSUB_DISCONNECT_STR   "h|disconnect"
 
 // todo move to an appropriate place
 #define MB_USB_EP_BULK_IN  0x82
@@ -51,6 +52,8 @@ enum events_e {
 
     EV_RESET,
     EV_ADVANCE,
+
+    EV_PUBSUB_FLUSH,
 
     EV_LINK_RESET_REQ,
     EV_LINK_RESET_ACK,
@@ -78,6 +81,7 @@ enum state_e {
     ST_OPEN,
 
     // graceful disconnect
+    ST_PUBSUB_FLUSH,
     ST_LINK_DISCONNECT,
     ST_LL_CLOSE_PEND,
     ST_LL_CLOSE,
@@ -115,6 +119,7 @@ struct state_machine_state_s {
 };
 
 static void send_to_frontend(struct dev_s * d, const char * subtopic, const struct jsdrv_union_s * value);
+static void publish_to_device(struct dev_s * d, const char * topic, const struct jsdrv_union_s * value);
 
 static void send_frame_ctrl_to_device(struct dev_s * d, uint8_t ctrl) {
     struct jsdrvp_msg_s * m = jsdrvp_msg_alloc_value(d->context, JSDRV_USBBK_MSG_BULK_OUT_DATA, &jsdrv_union_i32(0));
@@ -178,6 +183,12 @@ static bool on_open(struct dev_s * self, uint8_t event) {
     return true;
 }
 
+static bool on_pubsub_flush(struct dev_s * self, uint8_t event) {
+    (void) event;
+    publish_to_device(self, "c/./!ping", &jsdrv_union_str(PUBSUB_DISCONNECT_STR));
+    return true;
+}
+
 static bool on_link_disconnect(struct dev_s * self, uint8_t event) {
     (void) event;
     send_frame_ctrl_to_device(self, MB_FRAME_CTRL_DISCONNECT_REQ);
@@ -224,7 +235,7 @@ static bool guard_close_success(struct dev_s * self, uint8_t event) {
 
 const struct state_machine_transition_s state_machine_global[] = {
     {EV_RESET, ST_NOT_PRESENT, is_device_not_present},
-{EV_RESET, ST_CLOSED, is_device_present},
+    {EV_RESET, ST_CLOSED, is_device_present},
     TRANSITION_END
 };
 
@@ -261,23 +272,32 @@ const struct state_machine_transition_s state_machine_link_reset[] = {
 };
 
 const struct state_machine_transition_s state_machine_open[] = {
-    {EV_API_CLOSE_REQUEST, ST_LINK_DISCONNECT, NULL},
+    {EV_API_CLOSE_REQUEST, ST_PUBSUB_FLUSH, NULL},
+    TRANSITION_END
+};
+
+const struct state_machine_transition_s state_machine_pubsub_flush[] = {
+    {EV_PUBSUB_FLUSH, ST_LINK_DISCONNECT, NULL},
+    // todo timeout
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_link_disconnect[] = {
     {EV_LINK_DISCONNECT_ACK, ST_LL_CLOSE_PEND, NULL},
+    // todo timeout
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_ll_close_pend[] = {
     {EV_ADVANCE, ST_LL_CLOSE, NULL},
+    // todo timeout
     TRANSITION_END
 };
 
 const struct state_machine_transition_s state_machine_ll_close[] = {
     {EV_BACKEND_CLOSE_ACK, ST_FINALIZED, guard_is_finalizing},
     {EV_BACKEND_CLOSE_ACK, ST_CLOSED, guard_close_success},
+    // todo timeout
     TRANSITION_END
 };
 
@@ -293,6 +313,7 @@ const struct state_machine_state_s state_machine_states[] = {
     {ST_LL_BULK_OPEN, "ll_bulk_open", on_ll_bulk_open, NULL, state_machine_ll_bulk_open},
     {ST_LINK_RESET, "link_reset", on_link_reset, NULL, state_machine_link_reset},
     {ST_OPEN, "open", on_open, NULL, state_machine_open},
+       {ST_PUBSUB_FLUSH, "pubsub_flush", on_pubsub_flush, NULL, state_machine_pubsub_flush},
     {ST_LINK_DISCONNECT, "link_disconnect", on_link_disconnect, NULL, state_machine_link_disconnect},
     {ST_LL_CLOSE_PEND, "ll_close_pend", NULL, NULL, state_machine_ll_close_pend},
     {ST_LL_CLOSE, "ll_close", on_ll_close, NULL, state_machine_ll_close},
@@ -543,7 +564,15 @@ static void handle_in_pubsub(struct dev_s * d, uint16_t metadata, uint32_t * dat
     } else {
         m->value.value.u64 = *((uint64_t *) data);
     }
-    jsdrvp_backend_send(d->context, m);
+
+    if (jsdrv_cstr_ends_with(topic.topic, "/./!pong")
+            && (value_type == JSDRV_UNION_STR)
+            && jsdrv_cstr_casecmp(PUBSUB_DISCONNECT_STR, m->payload.str)) {
+        state_machine_process(d, EV_PUBSUB_FLUSH);
+        jsdrvp_msg_free(d->context, m);
+    } else {
+        jsdrvp_backend_send(d->context, m);
+    }
 }
 
 static void handle_stream_in_link_frame(struct dev_s * d, uint32_t * p_u32) {
