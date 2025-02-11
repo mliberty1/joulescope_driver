@@ -36,6 +36,7 @@ set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
 add_executable(minibitty_exe
         minibitty/main.c
+        minibitty/adapter.c
         minibitty/hotplug.c
         minibitty/info.c
         minibitty/loopback.c

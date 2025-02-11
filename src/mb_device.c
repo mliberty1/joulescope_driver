@@ -185,7 +185,8 @@ static bool on_open(struct dev_s * self, uint8_t event) {
 
 static bool on_pubsub_flush(struct dev_s * self, uint8_t event) {
     (void) event;
-    publish_to_device(self, "c/./!ping", &jsdrv_union_str(PUBSUB_DISCONNECT_STR));
+    // ok to use "." prefix since directly sending to first PubSub instance.
+    publish_to_device(self, "././!ping", &jsdrv_union_str(PUBSUB_DISCONNECT_STR));
     return true;
 }
 
