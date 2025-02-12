@@ -525,11 +525,8 @@ static void handle_in_link(struct dev_s * d, uint16_t metadata, uint32_t * data,
 }
 
 static void handle_in_trace(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
-    (void) d;
     (void) metadata;
-    (void) data;
-    (void) length;
-    // todo
+    send_to_frontend(d, "h/!trace", &jsdrv_union_bin((uint8_t *) data, length * 4));
 }
 
 static void handle_in_throughput(struct dev_s * d, uint16_t metadata, uint32_t * data, uint8_t length) {
