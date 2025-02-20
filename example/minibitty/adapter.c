@@ -14,36 +14,20 @@
  * limitations under the License.
  */
 
+#include "adapter.h"
 #include "minibitty_exe_prv.h"
 #include "jsdrv/cstr.h"
 #include "jsdrv_prv/platform.h"
+#include "adapter_tracy.h"
 #include <stdio.h>
 #include <string.h>
 
 #include <windows.h>  // todo remove
 
-#define MB_TRACE_SOF  (0xC3U)
 #define COUNTER_FMT "%10lu "
-enum mb_trace_type_e {
-    MB_TRACE_TYPE_INVALID = 0,
-    MB_TRACE_TYPE_READY = 1,
-    MB_TRACE_TYPE_ENTER = 2,
-    MB_TRACE_TYPE_EXIT = 3,  // optional duration if enter is omitted
-    MB_TRACE_TYPE_ALLOC = 4,
-    MB_TRACE_TYPE_FREE = 5,
-    MB_TRACE_TYPE_RSV6 = 6,
-    MB_TRACE_TYPE_RSV7 = 7,
-    MB_TRACE_TYPE_TIMESYNC = 8,
-    MB_TRACE_TYPE_TIMEMAP = 9,
-    MB_TRACE_TYPE_FAULT = 10,
-    MB_TRACE_TYPE_VALUE = 11,
-    MB_TRACE_TYPE_LOG = 12,
-    MB_TRACE_TYPE_RSV13 = 13,
-    MB_TRACE_TYPE_RSV14 = 14,
-    MB_TRACE_TYPE_OVERFLOW = 15,
-};
 
-const char * OBJ_NAME[16] = {
+
+const char * MB_OBJ_NAME[16] = {
     "isr",
     "context",
     "task",
@@ -66,12 +50,13 @@ static int usage(void) {
     printf(
         "usage: minibitty adapter [options] [device_filter]\n"
         "options:\n"
-        "  none\n"
-        );
+        "  --print      Print to console\n"
+        "  --tracy      Send to Tracy\n"
+    );
     return 1;
 }
 
-static void on_trace(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
+static void on_trace_print(void * user_data, const char * topic, const struct jsdrv_union_s * value) {
     (void) user_data;
     (void) topic;
     if (value->type != JSDRV_UNION_BIN) {
@@ -95,7 +80,7 @@ static void on_trace(void * user_data, const char * topic, const struct jsdrv_un
         uint8_t type = (p32[0] >> 12) & 0x0f;
         uint16_t metadata = p32[0] >> 16;
         uint32_t obj_type = (metadata >> 12) & 0x000f;
-        const char * obj_name = OBJ_NAME[obj_type];
+        const char * obj_name = MB_OBJ_NAME[obj_type];
         uint32_t obj_id = metadata & 0x0fff;
         uint32_t counter = p32[1];
         p32 += 2;
@@ -148,11 +133,12 @@ static void on_trace(void * user_data, const char * topic, const struct jsdrv_un
         }
         p32 += length;
     }
-
 }
 
+
 int on_adapter(struct app_s * self, int argc, char * argv[]) {
-    uint64_t outstanding = 1;
+    bool print = false;
+    bool tracy = false;
     struct jsdrv_topic_s topic;
     char *device_filter = NULL;
 
@@ -163,6 +149,12 @@ int on_adapter(struct app_s * self, int argc, char * argv[]) {
                 return usage();
             }
             device_filter = argv[0];
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--print")) {
+            print = true;
+            ARG_CONSUME();
+        } else if (0 == strcmp(argv[0], "--tracy")) {
+            tracy = true;
             ARG_CONSUME();
         } else {
             return usage();
@@ -180,13 +172,26 @@ int on_adapter(struct app_s * self, int argc, char * argv[]) {
 
     jsdrv_topic_set(&topic, self->device.topic);
     jsdrv_topic_append(&topic, "h/!trace");
-    jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_trace, NULL, 0);
+    if (print) {
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, on_trace_print, NULL, 0);
+    }
+
+    struct adapter_tracy_s * tracy_ = NULL;
+    if (tracy) {
+        tracy_ = adapter_tracy_initialize(self->context);
+        jsdrv_subscribe(self->context, topic.topic, JSDRV_SFLAG_PUB, adapter_tracy_on_trace, tracy_, 0);
+    }
 
     while (!quit_) {
         Sleep(10);
     }
 
     jsdrv_close(self->context, self->device.topic, JSDRV_TIMEOUT_MS_DEFAULT);
+
+    if (tracy) {
+        adapter_tracy_finalize(tracy_);
+        tracy_ = NULL;
+    }
 
     return 0;
 }

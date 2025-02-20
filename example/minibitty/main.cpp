@@ -90,7 +90,10 @@ static void app_finalize(struct app_s * self) {
 }
 
 int32_t app_scan(struct app_s * self) {
-    struct jsdrv_union_s devices_value = jsdrv_union_str(self->devices);
+    struct jsdrv_union_s devices_value;
+    memset(&devices_value, 0, sizeof(devices_value));
+    devices_value.type = JSDRV_UNION_STR;
+    devices_value.value.str = self->devices;
     devices_value.size = sizeof(self->devices);
     return jsdrv_query(self->context, JSDRV_MSG_DEVICE_LIST, &devices_value, 0);
 }

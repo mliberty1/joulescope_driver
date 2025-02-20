@@ -1,5 +1,5 @@
 /*
- * Copyright 2022 Jetperch LLC
+ * Copyright 2022-2025 Jetperch LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,8 +14,21 @@
  * limitations under the License.
  */
 
+/**
+ * @file
+ *
+ * @brief Adapter header.
+ */
+
+#ifndef MB_EXAMPLE_MINIBITTY_EXE_PRV_H__
+#define MB_EXAMPLE_MINIBITTY_EXE_PRV_H__
+
+
 #include "jsdrv.h"
+#include "mb/cdef.h"
 #include "jsdrv/topic.h"
+
+MB_CPP_GUARD_START
 
 #if defined(_WIN64)
 #define PLATFORM "win64"
@@ -81,3 +94,7 @@ int on_info(struct app_s * self, int argc, char * argv[]);
 int on_loopback(struct app_s * self, int argc, char * argv[]);
 int on_throughput(struct app_s * self, int argc, char * argv[]);
 int on_version(struct app_s * self, int argc, char * argv[]);
+
+MB_CPP_GUARD_END
+
+#endif  /* MB_EXAMPLE_MINIBITTY_EXE_PRV_H__ */

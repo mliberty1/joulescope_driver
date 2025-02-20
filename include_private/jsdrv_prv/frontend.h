@@ -29,6 +29,8 @@
 #ifndef JSDRV_PRV_FRONTEND_H_
 #define JSDRV_PRV_FRONTEND_H_
 
+JSDRV_CPP_GUARD_START
+
 // also see jsdrv_payload_type_e
 enum jsdrvp_payload_type_e {     // for jsdrv_union_s.app
     JSDRV_PAYLOAD_TYPE_SUB  = 128,          // jsdrv_payload_subscribe_s
@@ -215,5 +217,6 @@ void jsdrvp_device_subscribe(struct jsdrv_context_s * context, const char * dev_
 void jsdrvp_device_unsubscribe(struct jsdrv_context_s * context, const char * dev_topic,
                                const char * topic, uint8_t flags);
 
+JSDRV_CPP_GUARD_END
 
 #endif  /* JSDRV_PRV_FRONTEND_H_ */

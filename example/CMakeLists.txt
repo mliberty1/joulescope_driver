@@ -34,17 +34,39 @@ add_dependencies(jsdrv_exe jsdrv)
 target_link_libraries(jsdrv_exe jsdrv)
 set_target_properties(jsdrv_exe PROPERTIES OUTPUT_NAME jsdrv)
 
+add_definitions(
+        -DTRACY_ENABLE=1
+        -DTRACY_ON_DEMAND=1
+        -DTRACY_NO_CALLSTACK=1
+        -DTRACY_NO_CODE_TRANSFER=1
+        -DTRACY_NO_CONTEXT_SWITCH=1
+        -DTRACY_NO_EXIT=1
+        -DTRACY_NO_SAMPLING=1
+        -DTRACY_NO_VERIFY=1
+        -DTRACY_NO_VSYNC_CAPTURE=1
+        -DTRACY_NO_FRAME_IMAGE=1
+        -DTRACY_NO_SYSTEM_TRACING=1
+        -DTRACY_DELAYED_INIT=out.dat
+        -DTRACY_MANUAL_LIFETIME=1
+        -DTRACY_NO_CRASH_HANDLER=1
+        -DTRACY_VERBOSE=1
+)
 add_executable(minibitty_exe
-        minibitty/main.c
+        minibitty/main.cpp
         minibitty/adapter.c
         minibitty/hotplug.c
         minibitty/info.c
         minibitty/loopback.c
         minibitty/throughput.c
         minibitty/version.c
+        minibitty/adapter_tracy.cpp
+        minibitty/tracy/common/tracy_lz4.cpp
+        minibitty/tracy/common/TracySocket.cpp
 )
+target_compile_features(minibitty_exe PUBLIC cxx_std_11)
+#set_target_properties(minibitty_exe PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
 add_dependencies(minibitty_exe jsdrv)
-target_link_libraries(minibitty_exe jsdrv)
+target_link_libraries(minibitty_exe jsdrv ws2_32 dbghelp advapi32 user32)
 set_target_properties(minibitty_exe PROPERTIES OUTPUT_NAME minibitty)
 
 add_executable(fuzz fuzz.c)
