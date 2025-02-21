@@ -117,7 +117,7 @@ private:
     }
 
     void buf_ptr(const void * ptr, uint32_t size) {
-        memcpy(m_buf_ptr, ptr, sizeof(size));
+        memcpy(m_buf_ptr, ptr, size);
         m_buf_ptr += size;
     }
 
