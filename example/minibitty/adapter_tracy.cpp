@@ -28,6 +28,7 @@
 #include "tracy/common/TracyQueue.hpp"
 #include "tracy/client/TracyThread.hpp"
 #include <chrono>
+#include <thread>
 
 #include "jsdrv.h"
 #include "jsdrv/error_code.h"
@@ -394,7 +395,15 @@ void Profiler::Worker() {
             }
 
             if (idle) {
-                // todo wait on msg_queue and socket
+                keepAlive++;
+                if( keepAlive >= 500 ) {
+                    buf_header(QueueType::KeepAlive);
+                    keepAlive = 0;
+                } else {
+                    std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+                }
+            } else {
+                keepAlive = 0;
             }
         }
 
