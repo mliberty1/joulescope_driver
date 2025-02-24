@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-#define SOCKET_BUFFER_SIZE (65536)
 #define THREAD_ID (1)
 
 
@@ -139,19 +138,23 @@ private:
     void buf_source_location(uint64_t srcloc) {
         buf_header(QueueType::SourceLocation);
         buf_u64(4);  // name
-        buf_u64(8); // function
+        buf_u64(8);  // function
         buf_u64(12); // file
         buf_u32(srcloc & 0xffff); // line
-        buf_color(0x00ff00);
+        buf_color(0x000000);
     }
 
     bool SendData() {
-        int sz = (int) (m_buf_ptr - m_buf);
+        int sz = (int) (m_buf_ptr - m_buf_start);  // buffer not empty
         if (m_sock && sz) {
-            const lz4sz_t lz4sz = LZ4_compress_fast_continue( m_stream, (char *) m_buf, (char *) (m_lz4 + sizeof( lz4sz_t )), sz, LZ4Size, 1 );
-            memcpy( m_lz4, &lz4sz, sizeof( lz4sz ) );
-            m_buf_ptr = m_buf;
-            return m_sock->Send( m_lz4, lz4sz + sizeof( lz4sz_t ) ) != -1;
+            lz4sz_t lz4sz = LZ4_compress_fast_continue( m_stream, (char *) m_buf_start, (char *) (m_lz4 + sizeof( lz4sz_t )), sz, LZ4Size, 1 );
+            memcpy( m_lz4, &lz4sz, sizeof( lz4sz ) );  // frame starts with length
+            lz4sz += sizeof(lz4sz);
+            if ((m_buf_ptr - m_buf) >= (TargetFrameSize * 2 )) {
+                m_buf_ptr = m_buf;  // reset to start of buffer
+            }
+            m_buf_start = m_buf_ptr;
+            return m_sock->Send( m_lz4, lz4sz) != -1;
         }
         return true;
     }
@@ -163,8 +166,9 @@ private:
     LZ4_stream_t * m_stream;
     msg_queue_s * m_queue;
     jsdrv_context_s * m_context;
-    uint8_t m_buf[SOCKET_BUFFER_SIZE];
-    uint8_t * m_buf_ptr;
+    uint8_t m_buf[TargetFrameSize * 3];     // total buffer size
+    uint8_t * m_buf_start;  // current buffer block start, need to preserve 64 kB for LZ4_compress_fast_continue
+    uint8_t * m_buf_ptr;    // current buffer insertion location
     uint8_t m_lz4[LZ4Size + sizeof(lz4sz_t)];
     time_u m_time;
     int64_t m_reftime;
@@ -175,8 +179,7 @@ private:
 };
 
 Profiler::Profiler(jsdrv_context_s * context)
-    : m_epoch(0)
-    // m_epoch( std::chrono::duration_cast<std::chrono::seconds>( std::chrono::system_clock::now().time_since_epoch() ).count() )
+    : m_epoch( std::chrono::duration_cast<std::chrono::seconds>( std::chrono::system_clock::now().time_since_epoch() ).count() )
     , m_sock( nullptr )
     , m_broadcast( nullptr )
     , m_thread(nullptr)
@@ -189,6 +192,8 @@ Profiler::Profiler(jsdrv_context_s * context)
     , m_zone_id(1)
 {
     memset(m_buf, 0x55, sizeof(m_buf));
+    memset(m_lz4, 0x00, sizeof(m_lz4));
+    m_buf_start = m_buf;
     m_buf_ptr = m_buf;
     m_time.time = 0;
 }
@@ -363,7 +368,7 @@ void Profiler::Worker() {
             bool idle = true;
 
             // process trace message queue
-            while ((m_buf_ptr - m_buf) < (SOCKET_BUFFER_SIZE / 2)) {
+            while ((m_buf_ptr - m_buf) < (TargetFrameSize * 2)) {
                 idle = false;
                 jsdrvp_msg_s * msg = nullptr;
                 if (JSDRV_ERROR_TIMED_OUT == msg_queue_pop(m_queue, &msg, 0)) {
@@ -381,11 +386,11 @@ void Profiler::Worker() {
                 idle = false;
                 connActive = HandleServerQuery();
                 if( !connActive ) {
-                    break;
+                    break;  // out of inner handle loop
                 }
             }
             if( !connActive ) {
-                break;
+                break;  // out of main loop
             }
 
             if (idle) {
@@ -440,8 +445,6 @@ void Profiler::ProcessTraceMessage(jsdrvp_msg_s * msg) {
             file_id = (p32[0] >> 16) & 0x0000ffff;
             line = p32[0] & 0x0000ffff;
         }
-
-        uint8_t * buf_ptr_start = m_buf_ptr;
 
         switch (type) {
             case MB_TRACE_TYPE_INVALID:
@@ -523,13 +526,6 @@ void Profiler::ProcessTraceMessage(jsdrvp_msg_s * msg) {
                     break;
         }
         p32 += length;
-        if (buf_ptr_start < m_buf_ptr) {
-            while (buf_ptr_start < m_buf_ptr) {
-                printf("%02x ", *buf_ptr_start++);
-            }
-            printf("\n");
-            fflush(stdout);
-        }
     }
     jsdrvp_msg_free(m_context, msg);
 }
@@ -540,14 +536,13 @@ bool Profiler::HandleServerQuery() {
         return false;
     }
 
-    printf("%d %02x %08x_%08x %08x => ", payload.type, payload.type,
-        (uint32_t) (payload.ptr >> 32), (uint32_t) (payload.ptr & 0xFFFFFFFF), payload.extra);
-    uint8_t * buf_ptr_start = m_buf_ptr;
-
-
     switch( payload.type ) {
         case ServerQueryString:
-            buf_string_transfer(QueueType::StringData, payload.ptr, "hello"); // todo
+            if (payload.ptr == 0) {
+                buf_string_transfer(QueueType::StringData, payload.ptr, ""); // todo
+            } else {
+                buf_string_transfer(QueueType::StringData, payload.ptr, "hello"); // todo
+            }
             break;
         case ServerQueryThreadString:
             buf_string_transfer(QueueType::ThreadName, payload.ptr, "main");
@@ -563,17 +558,23 @@ bool Profiler::HandleServerQuery() {
         case ServerQueryDisconnect:
             m_quit = true;
             return false;
+        case ServerQuerySymbol:
+            buf_header(QueueType::AckServerQueryNoop);
+            //buf_header(QueueType::AckSymbolCodeNotAvailable);
+            break;
+        case ServerQuerySourceCode:
+            buf_header(QueueType::AckServerQueryNoop);
+            //buf_header(QueueType::AckSourceCodeNotAvailable);
+            break;
+        case ServerQueryDataTransfer:
+            buf_header(QueueType::AckServerQueryNoop);
+            break;
+        case ServerQueryDataTransferPart:
+            buf_header(QueueType::AckServerQueryNoop);
+            break;
         default:
             assert( false );
             break;
-    }
-
-    if (buf_ptr_start < m_buf_ptr) {
-        while (buf_ptr_start < m_buf_ptr) {
-            printf("%02x ", *buf_ptr_start++);
-        }
-        printf("\n");
-        fflush(stdout);
     }
     return true;
 }
